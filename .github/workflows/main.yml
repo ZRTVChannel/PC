@@ -1,0 +1,29 @@
+name: GitHub_RDP_Cloud_PC
+
+on: 
+  workflow_dispatch: # Supaya bisa dijalankan manual lewat tab Actions
+
+jobs:
+  build:
+    runs-on: windows-latest # Menggunakan Windows Server agar lebih mudah (RDP)
+    timeout-minutes: 360     # Batas maksimal GitHub Actions (6 Jam)
+
+    steps:
+    - name: Download & Setup RDP
+      run: |
+        # Bagian ini adalah contoh untuk mendownload script RDP
+        # Ganti baris di bawah ini dengan script RDP andalan Anda
+        echo "Sedang menyiapkan sistem..."
+
+    - name: Keep Alive (Anti-Timeout)
+      run: |
+        # Script ini akan mencetak log setiap 5 menit agar koneksi tidak terputus
+        $waktu_mulai = Get-Date
+        Write-Host "RDP dimulai pada: $waktu_mulai"
+        
+        while($true) {
+          $sekarang = Get-Date
+          $selisih = $sekarang - $waktu_mulai
+          Write-Host "Sesi masih aktif. Berjalan selama: $($selisih.Hours) jam $($selisih.Minutes) menit. Jangan tutup tab ini!"
+          Start-Sleep -Seconds 300 # Menunggu 5 menit sebelum mencetak log lagi
+        }
