@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================
-# 🚀 Auto Installer: GITHUB CODESPACES EDITION
+# 🚀 Auto Installer: DESKTOP POPUP (SLMGR FIXED)
 # ============================================
 
 set -e
@@ -9,16 +9,15 @@ trap 'echo "🛑 Menghentikan script..."; exit 0' SIGINT SIGTERM
 
 echo "=== 🔧 Menjalankan sebagai root ==="
 if [ "$EUID" -ne 0 ]; then
-  echo "❌ Butuh akses root. Jalankan dengan: sudo bash install.sh"
+  echo "❌ Butuh akses root."
   exit 1
 fi
 
-echo "=== 📦 Cek & Install Tools ==="
-# Di Codespaces, Docker biasanya sudah ada. Kita cuma butuh docker-compose.
+echo "=== 📦 Update & Install Tools ==="
 apt-get update -qq -y
 apt-get install docker-compose wget -qq -y
 
-# Fix Docker Socket permission (jika perlu)
+# Fix permissions untuk Codespaces
 if [ -e /var/run/docker.sock ]; then
     chmod 666 /var/run/docker.sock
 fi
@@ -28,7 +27,6 @@ fi
 # ======================================================
 echo
 echo "=== 🛠️ MEMBERSIHKAN INSTALASI ==="
-# Gunakan -f (force) agar tidak protes kalau container tidak ada
 docker rm -f windows >/dev/null 2>&1 || true
 rm -rf /root/dockercom
 mkdir -p /root/dockercom/oem
@@ -41,66 +39,82 @@ wget -q -O "/root/dockercom/oem/avatar.jpg" "https://i.pinimg.com/736x/b8/c6/b3/
 chmod 777 "/root/dockercom/oem/avatar.jpg"
 
 # ======================================================
-# 2️⃣ SCRIPT CMD: AMAN (TANPA RESTART)
+# 2️⃣ SCRIPT INJECTOR (LOGIKA SLMGR BARU)
 # ======================================================
-echo "   📝 Membuat Script 'install.bat'..."
+echo "   📝 Membuat Script System..."
 
+# Script ini jalan di background saat booting
 cat > /root/dockercom/oem/install.bat <<'EOF'
 @echo off
-if exist "C:\Users\Public\setup_complete.txt" exit
 
-:: 1. SETTING GAMBAR PROFIL
+:: --- BAGIAN 1: PASANG GAMBAR LOCKSCREEN ---
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v UseDefaultTile /t REG_DWORD /d 1 /f >nul
 set "SYSDIR=C:\ProgramData\Microsoft\User Account Pictures"
 set "SRC=C:\oem\avatar.jpg"
+
 copy /Y "%SRC%" "%SYSDIR%\user.jpg" >nul
 copy /Y "%SRC%" "%SYSDIR%\user.png" >nul
 copy /Y "%SRC%" "%SYSDIR%\user.bmp" >nul
 copy /Y "%SRC%" "%SYSDIR%\guest.bmp" >nul
 copy /Y "%SRC%" "%SYSDIR%\guest.png" >nul
-copy /Y "%SRC%" "%SYSDIR%\user-32.png" >nul
-copy /Y "%SRC%" "%SYSDIR%\user-40.png" >nul
-copy /Y "%SRC%" "%SYSDIR%\user-48.png" >nul
 copy /Y "%SRC%" "%SYSDIR%\user-192.png" >nul
+
 del /F /Q "C:\Users\Public\AccountPictures\*" >nul 2>&1
 rmdir /S /Q "C:\Users\Public\AccountPictures" >nul 2>&1
 
-:: 2. AKTIVASI SILENT
-cscript //B //Nologo C:\Windows\System32\slmgr /ipk W269N-WFGWX-YVC9B-4J6C9-T835GX
-cscript //B //Nologo C:\Windows\System32\slmgr /skms kms8.msguides.com
-cscript //B //Nologo C:\Windows\System32\slmgr /ato
-if %errorlevel% NEQ 0 (
-    cscript //B //Nologo C:\Windows\System32\slmgr /skms kms.digiboy.ir
-    cscript //B //Nologo C:\Windows\System32\slmgr /ato
-)
+:: --- BAGIAN 2: SIAPKAN SCRIPT DESKTOP ---
+set "STARTUP_FOLDER=C:\Users\MASTER\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
+if not exist "%STARTUP_FOLDER%" mkdir "%STARTUP_FOLDER%"
 
-:: 3. TANDAI SELESAI
-echo DONE > "C:\Users\Public\setup_complete.txt"
-attrib +h "C:\Users\Public\setup_complete.txt"
+:: Membuat file first_run.bat
+(
+echo @echo off
+echo title WINDOWS ACTIVATION
+echo color 0b
+echo cls
+echo echo ========================================================
+echo echo  SEDANG MENGAKTIFKAN WINDOWS...
+echo echo  Tunggu sebentar...
+echo echo ========================================================
+echo echo.
+echo echo 1. Memasang Key...
+echo :: Menggunakan cscript agar output tetap di CMD (Tidak Popup)
+echo cscript //Nologo %windir%\system32\slmgr /ipk W269N-WFGWX-YVC9B-4J6C9-T835GX
+echo echo.
+echo echo 2. Setting Server KMS...
+echo cscript //Nologo %windir%\system32\slmgr /skms kms8.msguides.com
+echo echo.
+echo echo 3. MEMULAI AKTIVASI...
+echo echo    CMD akan tertutup sekarang.
+echo echo    Tunggu Popup 'Windows Script Host' Muncul.
+echo.
+echo :: Perintah 'start slmgr' akan menjalankan popup terpisah dan CMD langsung exit
+echo start slmgr /ato
+echo.
+echo :: CMD langsung bunuh diri (Exit)
+echo del "%%~f0" ^& exit
+) > "%STARTUP_FOLDER%\first_run.bat"
+
 exit
 EOF
 
 echo "✅ Script Siap."
 
 # ======================================================
-# 3️⃣ GENERATE CONFIG (AUTO DETECT KVM)
+# 3️⃣ GENERATE CONFIG (CODESPACES MODE)
 # ======================================================
-echo "=== ⚙️ DETEKSI HARDWARE CODESPACES ==="
+echo "=== ⚙️ DETEKSI HARDWARE ==="
 
-# Cek apakah KVM tersedia di Codespace ini
 if [ -e /dev/kvm ]; then
-    echo "✅ KVM Terdeteksi! Performa Maksimal."
+    echo "✅ KVM Terdeteksi."
     KVM_CONFIG='    devices:
       - /dev/kvm
       - /dev/net/tun'
     ENV_KVM=""
 else
-    echo "⚠️  KVM TIDAK TERDETEKSI (Normal di Codespaces)."
-    echo "   ➡️  Mengaktifkan Mode Emulasi CPU (Sedikit lebih lambat tapi STABIL)."
-    # Kita hapus mapping device /dev/kvm agar tidak error "Host down"
+    echo "⚠️  KVM TIDAK ADA (Mode Codespaces)."
     KVM_CONFIG='    devices:
       - /dev/net/tun'
-    # Kita set Environment variable agar image tau kita tidak punya KVM
     ENV_KVM='      KVM: "N"'
 fi
 
@@ -133,7 +147,7 @@ ${KVM_CONFIG}
     stop_grace_period: 2m
 EOF
 
-# Jalankan Docker Compose
+# Jalankan Docker
 echo "▶️  Menjalankan Container..."
 docker-compose -f windows.yml up -d
 
@@ -155,23 +169,24 @@ CF_WEB=$(grep -o "https://[a-zA-Z0-9.-]*\.trycloudflare\.com" /var/log/cloudflar
 
 echo
 echo "=============================================="
-echo "🎉 INSTALASI KHUSUS CODESPACES BERHASIL"
+echo "🎉 INSTALASI SIAP"
 if [ -n "$CF_WEB" ]; then
   echo "🌍 Web Console: ${CF_WEB}"
 fi
 echo "=============================================="
-echo "⚠️  CATATAN:"
-echo "   1. Karena Codespace tidak punya KVM, Windows mungkin agak lambat."
-echo "   2. Error 'Host Down' sudah diperbaiki dengan menghapus /dev/kvm."
-echo "   3. Jangan lupa RESTART MANUAL (Start -> Restart) di dalam Windows."
+echo "📝 ALUR FINAL:"
+echo "   1. Masuk Desktop."
+echo "   2. CMD Muncul (Setting Key & Server)."
+echo "   3. CMD MATI/HILANG (Auto Exit)."
+echo "   4. BARU MUNCUL POPUP 'Product activated'."
+echo "   5. Anda Klik OK."
 echo "=============================================="
 
-# ANTI STOP (Keep Alive)
+# ANTI STOP
 SECONDS=0
 while true; do
   if [ -z "$(docker ps -q -f name=windows)" ]; then
     echo "[!] Container mati/restart..."
-    # Coba nyalakan lagi kalau mati
     docker-compose -f windows.yml up -d >/dev/null 2>&1
   else
     echo "[$(date '+%H:%M:%S')] ✅ Windows Aktif | Up: ${SECONDS}s"
