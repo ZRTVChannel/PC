@@ -1,9 +1,14 @@
 #!/bin/bash
 # ============================================
-# 🚀 Auto Installer: DESKTOP POPUP (SLMGR FIXED)
+# 🚀 Auto Installer: PERSISTENT + ANTI 404 + CMD TRICK
 # ============================================
 
 set -e
+
+# Folder Penyimpanan (JANGAN DI /tmp/ AGAR TIDAK HILANG)
+BASE_DIR="$(pwd)/windows_data"
+OEM_DIR="$BASE_DIR/oem"
+STORAGE_DIR="$BASE_DIR/storage"
 
 trap 'echo "🛑 Menghentikan script..."; exit 0' SIGINT SIGTERM
 
@@ -13,41 +18,53 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo "=== 📦 Update & Install Tools ==="
+echo "=== 📦 Cek Dependencies ==="
 apt-get update -qq -y
-apt-get install docker-compose wget -qq -y
+apt-get install docker-compose wget curl -qq -y
 
-# Fix permissions untuk Codespaces
+# Fix permissions
 if [ -e /var/run/docker.sock ]; then
     chmod 666 /var/run/docker.sock
 fi
 
 # ======================================================
-# 1️⃣ BERSIHKAN CONTAINER LAMA
+# 1️⃣ LOGIKA PINTAR: LANJUTKAN ATAU INSTALL BARU?
 # ======================================================
 echo
-echo "=== 🛠️ MEMBERSIHKAN INSTALASI ==="
-docker rm -f windows >/dev/null 2>&1 || true
-rm -rf /root/dockercom
-mkdir -p /root/dockercom/oem
-mkdir -p /tmp/windows-storage
-cd /root/dockercom
-
-# --- Download Gambar ---
-echo "   📥 Mengunduh Avatar..."
-wget -q -O "/root/dockercom/oem/avatar.jpg" "https://i.pinimg.com/736x/b8/c6/b3/b8c6b3bfba03883bc4fd243d0e80a8a3.jpg"
-chmod 777 "/root/dockercom/oem/avatar.jpg"
+if [ "$(docker ps -a -q -f name=windows)" ]; then
+    echo "=== ♻️ WINDOWS SUDAH ADA! MELANJUTKAN... ==="
+    echo "   Tidak perlu install ulang. Menyalakan container..."
+    docker start windows
+    echo "✅ Windows dinyalakan."
+    
+    # Skip langkah instalasi, langsung ke Cloudflare
+    EXISTING_INSTALL=true
+else
+    echo "=== 🆕 BELUM ADA WINDOWS. MEMULAI INSTALASI BARU... ==="
+    EXISTING_INSTALL=false
+    
+    # Buat folder penyimpanan persisten
+    mkdir -p "$OEM_DIR"
+    mkdir -p "$STORAGE_DIR"
+fi
 
 # ======================================================
-# 2️⃣ SCRIPT INJECTOR (LOGIKA SLMGR BARU)
+# 2️⃣ JIKA INSTALL BARU: SIAPKAN FILE & SCRIPT
 # ======================================================
-echo "   📝 Membuat Script System..."
+if [ "$EXISTING_INSTALL" = false ]; then
 
-# Script ini jalan di background saat booting
-cat > /root/dockercom/oem/install.bat <<'EOF'
+    # --- Download Gambar ---
+    echo "   📥 Mengunduh Avatar..."
+    wget -q -O "$OEM_DIR/avatar.jpg" "https://i.pinimg.com/736x/b8/c6/b3/b8c6b3bfba03883bc4fd243d0e80a8a3.jpg"
+    chmod 777 "$OEM_DIR/avatar.jpg"
+
+    # --- SCRIPT INJECTOR (CMD Exit -> Popup) ---
+    echo "   📝 Membuat Script System..."
+
+    cat > "$OEM_DIR/install.bat" <<'EOF'
 @echo off
 
-:: --- BAGIAN 1: PASANG GAMBAR LOCKSCREEN ---
+:: --- PASANG GAMBAR LOCKSCREEN ---
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v UseDefaultTile /t REG_DWORD /d 1 /f >nul
 set "SYSDIR=C:\ProgramData\Microsoft\User Account Pictures"
 set "SRC=C:\oem\avatar.jpg"
@@ -62,11 +79,11 @@ copy /Y "%SRC%" "%SYSDIR%\user-192.png" >nul
 del /F /Q "C:\Users\Public\AccountPictures\*" >nul 2>&1
 rmdir /S /Q "C:\Users\Public\AccountPictures" >nul 2>&1
 
-:: --- BAGIAN 2: SIAPKAN SCRIPT DESKTOP ---
+:: --- SIAPKAN SCRIPT DESKTOP ---
 set "STARTUP_FOLDER=C:\Users\MASTER\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
 if not exist "%STARTUP_FOLDER%" mkdir "%STARTUP_FOLDER%"
 
-:: Membuat file first_run.bat
+:: Script: CMD Muncul -> Exit -> Popup Muncul
 (
 echo @echo off
 echo title WINDOWS ACTIVATION
@@ -78,49 +95,40 @@ echo echo  Tunggu sebentar...
 echo echo ========================================================
 echo echo.
 echo echo 1. Memasang Key...
-echo :: Menggunakan cscript agar output tetap di CMD (Tidak Popup)
-echo cscript //Nologo %windir%\system32\slmgr /ipk W269N-WFGWX-YVC9B-4J6C9-T835GX
+echo cscript //Nologo C:\Windows\System32\slmgr /ipk W269N-WFGWX-YVC9B-4J6C9-T835GX
 echo echo.
 echo echo 2. Setting Server KMS...
-echo cscript //Nologo %windir%\system32\slmgr /skms kms8.msguides.com
+echo cscript //Nologo C:\Windows\System32\slmgr /skms kms8.msguides.com
 echo echo.
-echo echo 3. MEMULAI AKTIVASI...
+echo echo 3. MEMULAI POPUP...
 echo echo    CMD akan tertutup sekarang.
-echo echo    Tunggu Popup 'Windows Script Host' Muncul.
+echo echo    Tunggu Popup 'Windows Script Host' Muncul, lalu KLIK OK.
 echo.
-echo :: Perintah 'start slmgr' akan menjalankan popup terpisah dan CMD langsung exit
 echo start slmgr /ato
 echo.
-echo :: CMD langsung bunuh diri (Exit)
 echo del "%%~f0" ^& exit
 ) > "%STARTUP_FOLDER%\first_run.bat"
 
 exit
 EOF
 
-echo "✅ Script Siap."
-
-# ======================================================
-# 3️⃣ GENERATE CONFIG (CODESPACES MODE)
-# ======================================================
-echo "=== ⚙️ DETEKSI HARDWARE ==="
-
-if [ -e /dev/kvm ]; then
-    echo "✅ KVM Terdeteksi."
-    KVM_CONFIG='    devices:
+    # --- DETEKSI KVM (Hardware) ---
+    echo "   ⚙️ Konfigurasi Docker..."
+    if [ -e /dev/kvm ]; then
+        echo "      ✅ KVM Terdeteksi."
+        KVM_CONFIG='    devices:
       - /dev/kvm
       - /dev/net/tun'
-    ENV_KVM=""
-else
-    echo "⚠️  KVM TIDAK ADA (Mode Codespaces)."
-    KVM_CONFIG='    devices:
+        ENV_KVM=""
+    else
+        echo "      ⚠️  KVM TIDAK ADA (Mode Codespaces)."
+        KVM_CONFIG='    devices:
       - /dev/net/tun'
-    ENV_KVM='      KVM: "N"'
-fi
+        ENV_KVM='      KVM: "N"'
+    fi
 
-echo "=== 🚀 MENYIAPKAN FILE DOCKER-COMPOSE ==="
-
-cat > windows.yml <<EOF
+    # --- BUAT DOCKER COMPOSE ---
+    cat > windows.yml <<EOF
 version: "3.9"
 services:
   windows:
@@ -141,18 +149,42 @@ ${KVM_CONFIG}
       - "3389:3389/tcp"
       - "3389:3389/udp"
     volumes:
-      - /tmp/windows-storage:/storage
-      - ./oem:/oem
+      - $STORAGE_DIR:/storage
+      - $OEM_DIR:/oem
     restart: always
     stop_grace_period: 2m
 EOF
 
-# Jalankan Docker
-echo "▶️  Menjalankan Container..."
-docker-compose -f windows.yml up -d
+    echo "   ▶️  Menjalankan Instalasi Baru..."
+    docker-compose -f windows.yml up -d
+fi
 
 # ======================================================
-# 4️⃣ CLOUDFLARE
+# 3️⃣ ANTI ERROR 404 (HEALTH CHECK)
+# ======================================================
+echo
+echo "=== 🔍 Memeriksa Kesehatan Container ==="
+echo "   ⏳ Menunggu Layanan Web Windows (Port 8006) siap..."
+echo "      (Ini mencegah Error 404 pada Cloudflare)"
+
+# Loop menunggu sampai port 8006 merespon HTTP 200 OK
+RETRIES=0
+while ! curl -s --head --request GET http://localhost:8006 | grep "200 OK" > /dev/null; do
+    echo -n "."
+    sleep 2
+    RETRIES=$((RETRIES+1))
+    
+    # Jika sudah 60 detik (30x2) belum nyala, mungkin booting awal
+    if [ $RETRIES -gt 30 ] && [ "$EXISTING_INSTALL" = false ]; then
+        echo " (Sedang proses instalasi awal, mohon bersabar)..."
+        RETRIES=0
+    fi
+done
+echo
+echo "✅ Windows Web Service SIAP!"
+
+# ======================================================
+# 4️⃣ CLOUDFLARE TUNNEL
 # ======================================================
 echo "=== ☁️ Start Tunnel ==="
 if [ ! -f "/usr/local/bin/cloudflared" ]; then
@@ -164,37 +196,35 @@ pkill cloudflared || true
 nohup cloudflared tunnel --url http://localhost:8006 > /var/log/cloudflared_web.log 2>&1 &
 nohup cloudflared tunnel --url tcp://localhost:3389 > /var/log/cloudflared_rdp.log 2>&1 &
 
-sleep 8
+sleep 5
 CF_WEB=$(grep -o "https://[a-zA-Z0-9.-]*\.trycloudflare\.com" /var/log/cloudflared_web.log | head -n 1)
 
 echo
 echo "=============================================="
-echo "🎉 INSTALASI SIAP"
+echo "🎉 STATUS: ONLINE"
+if [ "$EXISTING_INSTALL" = true ]; then
+    echo "♻️  Mode: MELANJUTKAN SESI SEBELUMNYA"
+else
+    echo "🆕  Mode: INSTALASI BARU"
+fi
+echo "----------------------------------------------"
 if [ -n "$CF_WEB" ]; then
   echo "🌍 Web Console: ${CF_WEB}"
 fi
 echo "=============================================="
-echo "📝 ALUR FINAL:"
-echo "   1. Masuk Desktop."
-echo "   2. CMD Muncul (Setting Key & Server)."
-echo "   3. CMD MATI/HILANG (Auto Exit)."
-echo "   4. BARU MUNCUL POPUP 'Product activated'."
-echo "   5. Anda Klik OK."
-echo "=============================================="
+
+if [ "$EXISTING_INSTALL" = false ]; then
+    echo "  EDIT BY FROXLYTRON "
+    echo "   ENJOY FOR YOU PC "
+    echo "   UNTUK BUAT KAMU "
+fi
 
 # ANTI STOP
 SECONDS=0
 while true; do
   if [ -z "$(docker ps -q -f name=windows)" ]; then
-    echo "[!] Container mati/restart..."
-    docker-compose -f windows.yml up -d >/dev/null 2>&1
-  else
-    echo "[$(date '+%H:%M:%S')] ✅ Windows Aktif | Up: ${SECONDS}s"
-  fi
-
-  if [ -z "$CF_WEB" ]; then
-     CF_WEB=$(grep -o "https://[a-zA-Z0-9.-]*\.trycloudflare\.com" /var/log/cloudflared_web.log | head -n 1)
-     [ -n "$CF_WEB" ] && echo "✨ Link Web: ${CF_WEB}"
+    echo "[!] Container mati/restart. Menghidupkan kembali..."
+    docker start windows >/dev/null 2>&1
   fi
   sleep 60
 done
