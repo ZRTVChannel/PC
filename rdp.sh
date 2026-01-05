@@ -1,56 +1,47 @@
 #!/bin/bash
 # ============================================
-# 🚀 Auto Installer: FIXED SERVICE & CLEANUP
+# 🚀 Auto Installer: GITHUB CODESPACES EDITION
 # ============================================
 
-# Jangan gunakan set -e agar script tidak mati jika ada error kecil
-set +e
+set -e
 
 trap 'echo "🛑 Menghentikan script..."; exit 0' SIGINT SIGTERM
 
 echo "=== 🔧 Menjalankan sebagai root ==="
 if [ "$EUID" -ne 0 ]; then
-  echo "❌ Butuh akses root."
+  echo "❌ Butuh akses root. Jalankan dengan: sudo bash install.sh"
   exit 1
 fi
 
-echo "=== 📦 Update & Install Docker ==="
+echo "=== 📦 Cek & Install Tools ==="
+# Di Codespaces, Docker biasanya sudah ada. Kita cuma butuh docker-compose.
 apt-get update -qq -y
 apt-get install docker-compose wget -qq -y
 
-# --- PERBAIKAN SYSTEMD vs SERVICE ---
-echo "=== ⚙️ Menyalakan Docker Service ==="
-if pidof dockerd >/dev/null; then
-    echo "✅ Docker sudah berjalan."
-else
-    if command -v systemctl >/dev/null; then
-        systemctl start docker
-    else
-        # Fallback untuk Codespace/Container environment
-        service docker start
-    fi
+# Fix Docker Socket permission (jika perlu)
+if [ -e /var/run/docker.sock ]; then
+    chmod 666 /var/run/docker.sock
 fi
 
 # ======================================================
-# 1️⃣ BERSIHKAN CONTAINER (DENGAN CARA HALUS)
+# 1️⃣ BERSIHKAN CONTAINER LAMA
 # ======================================================
 echo
-echo "=== 🛠️ MEMBERSIHKAN INSTALASI LAMA ==="
-# Tambahkan >/dev/null 2>&1 agar error "No such container" tidak muncul di layar
-docker stop windows >/dev/null 2>&1
-docker rm windows >/dev/null 2>&1
+echo "=== 🛠️ MEMBERSIHKAN INSTALASI ==="
+# Gunakan -f (force) agar tidak protes kalau container tidak ada
+docker rm -f windows >/dev/null 2>&1 || true
 rm -rf /root/dockercom
 mkdir -p /root/dockercom/oem
 mkdir -p /tmp/windows-storage
 cd /root/dockercom
 
-# --- Download Gambar Profil ---
+# --- Download Gambar ---
 echo "   📥 Mengunduh Avatar..."
 wget -q -O "/root/dockercom/oem/avatar.jpg" "https://i.pinimg.com/736x/b8/c6/b3/b8c6b3bfba03883bc4fd243d0e80a8a3.jpg"
 chmod 777 "/root/dockercom/oem/avatar.jpg"
 
 # ======================================================
-# 2️⃣ SCRIPT CMD: AMAN & SILENT
+# 2️⃣ SCRIPT CMD: AMAN (TANPA RESTART)
 # ======================================================
 echo "   📝 Membuat Script 'install.bat'..."
 
@@ -58,7 +49,7 @@ cat > /root/dockercom/oem/install.bat <<'EOF'
 @echo off
 if exist "C:\Users\Public\setup_complete.txt" exit
 
-:: 1. FORCE GAMBAR PROFIL
+:: 1. SETTING GAMBAR PROFIL
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v UseDefaultTile /t REG_DWORD /d 1 /f >nul
 set "SYSDIR=C:\ProgramData\Microsoft\User Account Pictures"
 set "SRC=C:\oem\avatar.jpg"
@@ -83,7 +74,7 @@ if %errorlevel% NEQ 0 (
     cscript //B //Nologo C:\Windows\System32\slmgr /ato
 )
 
-:: 3. TANDAI SELESAI (TANPA RESTART OTOMATIS)
+:: 3. TANDAI SELESAI
 echo DONE > "C:\Users\Public\setup_complete.txt"
 attrib +h "C:\Users\Public\setup_complete.txt"
 exit
@@ -92,11 +83,30 @@ EOF
 echo "✅ Script Siap."
 
 # ======================================================
-# 3️⃣ JALANKAN CONTAINER
+# 3️⃣ GENERATE CONFIG (AUTO DETECT KVM)
 # ======================================================
-echo "=== 🚀 MENJALANKAN WINDOWS ==="
+echo "=== ⚙️ DETEKSI HARDWARE CODESPACES ==="
 
-cat > windows.yml <<'EOF'
+# Cek apakah KVM tersedia di Codespace ini
+if [ -e /dev/kvm ]; then
+    echo "✅ KVM Terdeteksi! Performa Maksimal."
+    KVM_CONFIG='    devices:
+      - /dev/kvm
+      - /dev/net/tun'
+    ENV_KVM=""
+else
+    echo "⚠️  KVM TIDAK TERDETEKSI (Normal di Codespaces)."
+    echo "   ➡️  Mengaktifkan Mode Emulasi CPU (Sedikit lebih lambat tapi STABIL)."
+    # Kita hapus mapping device /dev/kvm agar tidak error "Host down"
+    KVM_CONFIG='    devices:
+      - /dev/net/tun'
+    # Kita set Environment variable agar image tau kita tidak punya KVM
+    ENV_KVM='      KVM: "N"'
+fi
+
+echo "=== 🚀 MENYIAPKAN FILE DOCKER-COMPOSE ==="
+
+cat > windows.yml <<EOF
 version: "3.9"
 services:
   windows:
@@ -106,11 +116,10 @@ services:
       VERSION: "11"
       USERNAME: "MASTER"
       PASSWORD: "admin@123"
-      RAM_SIZE: "16G"
+      RAM_SIZE: "7G"
       CPU_CORES: "4"
-    devices:
-      - /dev/kvm
-      - /dev/net/tun
+${ENV_KVM}
+${KVM_CONFIG}
     cap_add:
       - NET_ADMIN
     ports:
@@ -124,6 +133,8 @@ services:
     stop_grace_period: 2m
 EOF
 
+# Jalankan Docker Compose
+echo "▶️  Menjalankan Container..."
 docker-compose -f windows.yml up -d
 
 # ======================================================
@@ -144,23 +155,24 @@ CF_WEB=$(grep -o "https://[a-zA-Z0-9.-]*\.trycloudflare\.com" /var/log/cloudflar
 
 echo
 echo "=============================================="
-echo "🎉 INSTALASI DIMULAI (VERSI FIX)"
+echo "🎉 INSTALASI KHUSUS CODESPACES BERHASIL"
 if [ -n "$CF_WEB" ]; then
   echo "🌍 Web Console: ${CF_WEB}"
 fi
 echo "=============================================="
-echo "⚠️  PETUNJUK:"
-echo "   1. Windows akan booting normal (Tanpa Error)."
-echo "   2. Setelah masuk Desktop, RESTART MANUAL sekali (Start -> Restart)."
-echo "   3. Setelah restart manual, Gambar Profil akan muncul."
+echo "⚠️  CATATAN:"
+echo "   1. Karena Codespace tidak punya KVM, Windows mungkin agak lambat."
+echo "   2. Error 'Host Down' sudah diperbaiki dengan menghapus /dev/kvm."
+echo "   3. Jangan lupa RESTART MANUAL (Start -> Restart) di dalam Windows."
 echo "=============================================="
 
-# ANTI STOP
+# ANTI STOP (Keep Alive)
 SECONDS=0
 while true; do
   if [ -z "$(docker ps -q -f name=windows)" ]; then
-    echo "[!] Container windows mati/restart..."
-    sleep 5
+    echo "[!] Container mati/restart..."
+    # Coba nyalakan lagi kalau mati
+    docker-compose -f windows.yml up -d >/dev/null 2>&1
   else
     echo "[$(date '+%H:%M:%S')] ✅ Windows Aktif | Up: ${SECONDS}s"
   fi
