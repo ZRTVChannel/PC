@@ -126,7 +126,7 @@ services:
       VERSION: "11"
       USERNAME: "MASTER"
       PASSWORD: "admin@123"
-      RAM_SIZE: "8G"
+      RAM_SIZE: "16G"
       CPU_CORES: "4"
     devices:
       - /dev/kvm
