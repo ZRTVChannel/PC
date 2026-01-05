@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================
-# 🚀 Auto Installer: Windows 11 on Docker + Cloudflare Tunnel
-# + Anti Stop/Timeout Protection for Codespaces
+# 🚀 Auto Installer: Windows 11 + Cloudflare + Anti-Stop
+# + Auto Download Profile Picture
 # ============================================
 
 set -e
@@ -11,23 +11,42 @@ trap 'echo "🛑 Menghentikan script..."; exit 0' SIGINT SIGTERM
 
 echo "=== 🔧 Menjalankan sebagai root ==="
 if [ "$EUID" -ne 0 ]; then
-  echo "Script ini butuh akses root. Jalankan dengan: sudo bash install-windows11-cloudflare.sh"
+  echo "Script ini butuh akses root. Jalankan dengan: sudo bash install-windows11.sh"
   exit 1
 fi
 
 echo
 echo "=== 📦 Update & Install Docker Compose ==="
-# Menggunakan apt-get dengan opsi quiet untuk mengurangi output spam saat update
 apt-get update -qq -y
-apt-get install docker-compose -qq -y
+apt-get install docker-compose wget -qq -y
 
 systemctl enable docker
 systemctl start docker
 
 echo
-echo "=== 📂 Membuat direktori kerja dockercom ==="
+echo "=== 📂 Membuat direktori kerja & Storage ==="
 mkdir -p /root/dockercom
+mkdir -p /tmp/windows-storage
 cd /root/dockercom
+
+# ======================================================
+# 🖼️ DOWNLOAD USER PROFILE PICTURE (SEKALI)
+# ======================================================
+echo
+echo "=== 🖼️ Menyiapkan Gambar Profil User ==="
+PROFILE_IMG="/tmp/windows-storage/avatar.jpg"
+
+# Cek jika gambar belum ada, baru download (Supaya cuma "sekali")
+if [ ! -f "$PROFILE_IMG" ]; then
+  echo "📥 Mengunduh gambar profil keren..."
+  # URL gambar profil (Bisa diganti link gambar lain jika mau)
+  wget -q -O "$PROFILE_IMG" "https://i.pinimg.com/736x/b8/c6/b3/b8c6b3bfba03883bc4fd243d0e80a8a3.jpg"
+  chmod 777 "$PROFILE_IMG"
+  echo "✅ Gambar profil tersimpan di: $PROFILE_IMG"
+  echo "ℹ️  Nanti di Windows, cari file ini di drive Storage untuk dijadikan profil."
+else
+  echo "✅ Gambar profil sudah ada, melewati unduhan."
+fi
 
 echo
 echo "=== 🧾 Membuat file windows.yml ==="
@@ -53,13 +72,11 @@ services:
       - "3389:3389/tcp"
       - "3389:3389/udp"
     volumes:
+      # Mapping folder host yang berisi gambar profil ke dalam windows
       - /tmp/windows-storage:/storage
     restart: always
     stop_grace_period: 2m
 EOF
-
-echo
-echo "=== ✅ File windows.yml berhasil dibuat ==="
 
 echo
 echo "=== 🚀 Menjalankan Windows 11 container ==="
@@ -74,11 +91,9 @@ if [ ! -f "/usr/local/bin/cloudflared" ]; then
 fi
 
 echo
-echo "=== 🌍 Membuat tunnel publik untuk akses web & RDP ==="
-# Kill cloudflared lama jika ada agar tidak bentrok
+echo "=== 🌍 Membuat tunnel publik ==="
 pkill cloudflared || true
 
-# Menjalankan tunnel
 nohup cloudflared tunnel --url http://localhost:8006 > /var/log/cloudflared_web.log 2>&1 &
 nohup cloudflared tunnel --url tcp://localhost:3389 > /var/log/cloudflared_rdp.log 2>&1 &
 
@@ -93,54 +108,47 @@ echo "=============================================="
 echo "🎉 Instalasi Selesai!"
 echo
 if [ -n "$CF_WEB" ]; then
-  echo "🌍 Web Console (NoVNC / UI):"
+  echo "🌍 Web Console (NoVNC):"
   echo "    ${CF_WEB}"
 else
-  echo "⚠️ Link Web belum muncul. Coba tunggu beberapa saat dan cek log."
+  echo "⚠️ Link Web belum muncul. Tunggu sebentar..."
 fi
 
 if [ -n "$CF_RDP" ]; then
-  echo
-  echo "🖥️  Remote Desktop (RDP) Address:"
+  echo "🖥️  RDP Address:"
   echo "    ${CF_RDP}"
-else
-  echo "⚠️ Link RDP belum muncul. Coba tunggu beberapa saat dan cek log."
 fi
-
 echo
-echo "🔑 Username: MASTER"
-echo "🔒 Password: admin@123"
+echo "🔑 User: Admin | Pass: admin@123"
+echo "🖼️  Gambar Profil: Tersedia di folder 'storage' di dalam Windows"
 echo "=============================================="
 
 # ======================================================
 # 🛡️ ANTI STOP / TIMEOUT PROTECTION
 # ======================================================
 echo
-echo "=== 🛡️ MENGAKTIFKAN MODE ANTI-STOP CODESPACE 🛡️ ==="
-echo "Script ini akan terus berjalan agar environment tidak mati (timeout)."
-echo "Jangan tutup terminal ini!"
+echo "=== 🛡️ MENGAKTIFKAN MODE ANTI-STOP ==="
+echo "Script ini berjalan loop agar Codespace tidak mati."
+echo "JANGAN TUTUP TERMINAL INI."
 echo "Edit By Froxlytron"
-echo "ENJOY FOR YOU PC"
+echo "ENJOY FOR YOU PC!"
+echo "UNTUK BUAT KAMU!"
 
 SECONDS=0
 while true; do
-  # 1. Menampilkan Heartbeat agar terminal dianggap aktif
   echo "[$(date '+%H:%M:%S')] ✅ System Active | Uptime: ${SECONDS}s"
   
-  # 2. Cek apakah container windows masih hidup
+  # Cek container, nyalakan jika mati
   if [ -z "$(docker ps -q -f name=windows)" ]; then
-    echo "[!] WARNING: Container Windows mati! Mencoba menyalakan kembali..."
+    echo "[!] Container Windows mati! Restarting..."
     docker-compose -f windows.yml up -d
   fi
 
-  # 3. Opsional: Cek link cloudflare lagi jika tadi gagal
+  # Coba ambil link lagi jika tadi kosong
   if [ -z "$CF_WEB" ]; then
      CF_WEB=$(grep -o "https://[a-zA-Z0-9.-]*\.trycloudflare\.com" /var/log/cloudflared_web.log | head -n 1)
-     if [ -n "$CF_WEB" ]; then
-        echo "✨ Link Web Baru Ditemukan: ${CF_WEB}"
-     fi
+     [ -n "$CF_WEB" ] && echo "✨ Link Web Baru: ${CF_WEB}"
   fi
 
-  # Sleep 60 detik agar tidak membanjiri log, tapi cukup untuk mencegah idle disconnect
   sleep 60
 done
