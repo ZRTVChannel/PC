@@ -1,9 +1,10 @@
 #!/bin/bash
 # ============================================
-# 🚀 Auto Installer: SAFE MODE (NO FORCED RESTART)
+# 🚀 Auto Installer: FIXED SERVICE & CLEANUP
 # ============================================
 
-set -e
+# Jangan gunakan set -e agar script tidak mati jika ada error kecil
+set +e
 
 trap 'echo "🛑 Menghentikan script..."; exit 0' SIGINT SIGTERM
 
@@ -16,16 +17,28 @@ fi
 echo "=== 📦 Update & Install Docker ==="
 apt-get update -qq -y
 apt-get install docker-compose wget -qq -y
-systemctl start docker
+
+# --- PERBAIKAN SYSTEMD vs SERVICE ---
+echo "=== ⚙️ Menyalakan Docker Service ==="
+if pidof dockerd >/dev/null; then
+    echo "✅ Docker sudah berjalan."
+else
+    if command -v systemctl >/dev/null; then
+        systemctl start docker
+    else
+        # Fallback untuk Codespace/Container environment
+        service docker start
+    fi
+fi
 
 # ======================================================
-# 1️⃣ BERSIHKAN CONTAINER RUSAK & SIAPKAN FILE
+# 1️⃣ BERSIHKAN CONTAINER (DENGAN CARA HALUS)
 # ======================================================
 echo
-echo "=== 🛠️ MEMBERSIHKAN INSTALASI RUSAK ==="
-# Hapus container lama yang error
-docker stop windows || true
-docker rm windows || true
+echo "=== 🛠️ MEMBERSIHKAN INSTALASI LAMA ==="
+# Tambahkan >/dev/null 2>&1 agar error "No such container" tidak muncul di layar
+docker stop windows >/dev/null 2>&1
+docker rm windows >/dev/null 2>&1
 rm -rf /root/dockercom
 mkdir -p /root/dockercom/oem
 mkdir -p /tmp/windows-storage
@@ -37,26 +50,18 @@ wget -q -O "/root/dockercom/oem/avatar.jpg" "https://i.pinimg.com/736x/b8/c6/b3/
 chmod 777 "/root/dockercom/oem/avatar.jpg"
 
 # ======================================================
-# 2️⃣ SCRIPT CMD: AMAN (TANPA RESTART)
+# 2️⃣ SCRIPT CMD: AMAN & SILENT
 # ======================================================
-echo "   📝 Membuat Script 'install.bat' (Versi Aman)..."
+echo "   📝 Membuat Script 'install.bat'..."
 
 cat > /root/dockercom/oem/install.bat <<'EOF'
 @echo off
-:: Cek Marker
 if exist "C:\Users\Public\setup_complete.txt" exit
 
-:: =========================================================
-:: BAGIAN 1: SETTING GAMBAR PROFIL (Hanya Copy, Tidak Restart)
-:: =========================================================
-
-:: Registry Hack agar Windows membaca gambar kita
+:: 1. FORCE GAMBAR PROFIL
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v UseDefaultTile /t REG_DWORD /d 1 /f >nul
-
-:: Timpa Gambar Default System
 set "SYSDIR=C:\ProgramData\Microsoft\User Account Pictures"
 set "SRC=C:\oem\avatar.jpg"
-
 copy /Y "%SRC%" "%SYSDIR%\user.jpg" >nul
 copy /Y "%SRC%" "%SYSDIR%\user.png" >nul
 copy /Y "%SRC%" "%SYSDIR%\user.bmp" >nul
@@ -66,44 +71,30 @@ copy /Y "%SRC%" "%SYSDIR%\user-32.png" >nul
 copy /Y "%SRC%" "%SYSDIR%\user-40.png" >nul
 copy /Y "%SRC%" "%SYSDIR%\user-48.png" >nul
 copy /Y "%SRC%" "%SYSDIR%\user-192.png" >nul
-
-:: Hapus Cache
 del /F /Q "C:\Users\Public\AccountPictures\*" >nul 2>&1
 rmdir /S /Q "C:\Users\Public\AccountPictures" >nul 2>&1
 
-:: =========================================================
-:: BAGIAN 2: AKTIVASI SILENT
-:: =========================================================
-:: Batch Mode (//B) agar tidak ada popup
-
+:: 2. AKTIVASI SILENT
 cscript //B //Nologo C:\Windows\System32\slmgr /ipk W269N-WFGWX-YVC9B-4J6C9-T835GX
 cscript //B //Nologo C:\Windows\System32\slmgr /skms kms8.msguides.com
 cscript //B //Nologo C:\Windows\System32\slmgr /ato
-
 if %errorlevel% NEQ 0 (
     cscript //B //Nologo C:\Windows\System32\slmgr /skms kms.digiboy.ir
     cscript //B //Nologo C:\Windows\System32\slmgr /ato
 )
 
-:: =========================================================
-:: BAGIAN 3: FINISHING (JANGAN RESTART)
-:: =========================================================
-
-:: Tandai selesai
+:: 3. TANDAI SELESAI (TANPA RESTART OTOMATIS)
 echo DONE > "C:\Users\Public\setup_complete.txt"
 attrib +h "C:\Users\Public\setup_complete.txt"
-
-:: KITA TIDAK MERESTART OTOMATIS DI SINI
-:: Agar Windows Setup bisa selesai dengan aman.
 exit
 EOF
 
-echo "✅ Script Aman Siap."
+echo "✅ Script Siap."
 
 # ======================================================
-# 3️⃣ KONFIGURASI DOCKER
+# 3️⃣ JALANKAN CONTAINER
 # ======================================================
-echo "=== 🚀 MENJALANKAN ULANG CONTAINER ==="
+echo "=== 🚀 MENJALANKAN WINDOWS ==="
 
 cat > windows.yml <<'EOF'
 version: "3.9"
@@ -153,17 +144,15 @@ CF_WEB=$(grep -o "https://[a-zA-Z0-9.-]*\.trycloudflare\.com" /var/log/cloudflar
 
 echo
 echo "=============================================="
-echo "🎉 INSTALASI AMAN DIMULAI"
+echo "🎉 INSTALASI DIMULAI (VERSI FIX)"
 if [ -n "$CF_WEB" ]; then
   echo "🌍 Web Console: ${CF_WEB}"
 fi
 echo "=============================================="
-echo "⚠️  INSTRUKSI PENTING (BACA INI):"
-echo "   1. Windows akan booting dengan normal (TIDAK AKAN ERROR LAGI)."
-echo "   2. Gambar Profil MUNGKIN BELUM MUNCUL saat pertama kali login."
-echo "   3. SETELAH MASUK DESKTOP, silakan RESTART MANUAL sekali:"
-echo "      Start -> Power -> Restart."
-echo "   4. Setelah restart manual, Gambar Profil dan Aktivasi akan sempurna."
+echo "⚠️  PETUNJUK:"
+echo "   1. Windows akan booting normal (Tanpa Error)."
+echo "   2. Setelah masuk Desktop, RESTART MANUAL sekali (Start -> Restart)."
+echo "   3. Setelah restart manual, Gambar Profil akan muncul."
 echo "=============================================="
 
 # ANTI STOP
