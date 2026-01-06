@@ -1,11 +1,11 @@
 #!/bin/bash
 # ============================================
-# 🚀 Auto Installer: PERSISTENT + ANTI 404 + CMD TRICK
+# 🚀 Auto Installer: FINAL TINY11 (CODESPACES PERFECTED)
 # ============================================
 
 set -e
 
-# Folder Penyimpanan (JANGAN DI /tmp/ AGAR TIDAK HILANG)
+# Konfigurasi Folder Penyimpanan (Aman dari Reset)
 BASE_DIR="$(pwd)/windows_data"
 OEM_DIR="$BASE_DIR/oem"
 STORAGE_DIR="$BASE_DIR/storage"
@@ -18,11 +18,17 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# ======================================================
+# 🧹 BERSIH-BERSIH DISK (WAJIB UTK CODESPACES)
+# ======================================================
+echo "=== 🧹 MEMBERSIHKAN DISK SPACE ==="
+# Hapus cache docker agar muat install Tiny11
+docker system prune -a -f --volumes >/dev/null 2>&1 || true
+
 echo "=== 📦 Cek Dependencies ==="
 apt-get update -qq -y
 apt-get install docker-compose wget curl -qq -y
 
-# Fix permissions
 if [ -e /var/run/docker.sock ]; then
     chmod 666 /var/run/docker.sock
 fi
@@ -30,32 +36,34 @@ fi
 # ======================================================
 # 1️⃣ LOGIKA PINTAR: LANJUTKAN ATAU INSTALL BARU?
 # ======================================================
-echo
-if [ "$(docker ps -a -q -f name=windows)" ]; then
-    echo "=== ♻️ WINDOWS SUDAH ADA! MELANJUTKAN... ==="
-    echo "   Tidak perlu install ulang. Menyalakan container..."
-    docker start windows
-    echo "✅ Windows dinyalakan."
+# Cek apakah folder data ada
+if [ -d "$BASE_DIR" ] && [ -f "$BASE_DIR/data.img" ]; then
+    echo "=== ♻️ DATA LAMA DITEMUKAN! MELANJUTKAN... ==="
     
-    # Skip langkah instalasi, langsung ke Cloudflare
-    EXISTING_INSTALL=true
+    # Cek container, jika mati nyalakan, jika hilang buat lagi tapi pakai data lama
+    if [ ! "$(docker ps -a -q -f name=windows)" ]; then
+         echo "   (Container hilang, membuat ulang wrapper...)"
+         EXISTING_INSTALL=false
+         # Kita set false agar dia generate yml lagi, tapi data di storage tetap aman
+    else
+         docker start windows
+         EXISTING_INSTALL=true
+    fi
 else
-    echo "=== 🆕 BELUM ADA WINDOWS. MEMULAI INSTALASI BARU... ==="
+    echo "=== 🆕 MEMULAI INSTALASI BARU (TINY11)... ==="
     EXISTING_INSTALL=false
-    
-    # Buat folder penyimpanan persisten
     mkdir -p "$OEM_DIR"
     mkdir -p "$STORAGE_DIR"
 fi
 
 # ======================================================
-# 2️⃣ JIKA INSTALL BARU: SIAPKAN FILE & SCRIPT
+# 2️⃣ PERSIAPAN FILE (JIKA INSTALL/RE-CREATE)
 # ======================================================
 if [ "$EXISTING_INSTALL" = false ]; then
 
-    # --- Download Gambar ---
+    # --- Download Gambar Profil ---
     echo "   📥 Mengunduh Avatar..."
-    wget -q -O "$OEM_DIR/avatar.jpg" "https://i.pinimg.com/736x/b8/c6/b3/b8c6b3bfba03883bc4fd243d0e80a8a3.jpg"
+    wget -q -O "$OEM_DIR/avatar.jpg" "https://cdn.pixabay.com/photo/2016/08/08/09/17/avatar-1577909_1280.png"
     chmod 777 "$OEM_DIR/avatar.jpg"
 
     # --- SCRIPT INJECTOR (CMD Exit -> Popup) ---
@@ -64,7 +72,12 @@ if [ "$EXISTING_INSTALL" = false ]; then
     cat > "$OEM_DIR/install.bat" <<'EOF'
 @echo off
 
-:: --- PASANG GAMBAR LOCKSCREEN ---
+:: 1. HAPUS BRANDING DOCKER (Biar Logo Asli Windows)
+reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation" /f >nul 2>&1
+bcdedit /set {current} bootux standard >nul 2>&1
+
+:: 2. PASANG GAMBAR LOCKSCREEN & PROFIL
+::    Registry ini memaksa Lockscreen pakai gambar kita
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" /v UseDefaultTile /t REG_DWORD /d 1 /f >nul
 set "SYSDIR=C:\ProgramData\Microsoft\User Account Pictures"
 set "SRC=C:\oem\avatar.jpg"
@@ -79,55 +92,53 @@ copy /Y "%SRC%" "%SYSDIR%\user-192.png" >nul
 del /F /Q "C:\Users\Public\AccountPictures\*" >nul 2>&1
 rmdir /S /Q "C:\Users\Public\AccountPictures" >nul 2>&1
 
-:: --- SIAPKAN SCRIPT DESKTOP ---
+:: 3. SCRIPT DESKTOP (CMD MUNCUL -> EXIT -> POPUP)
 set "STARTUP_FOLDER=C:\Users\MASTER\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
 if not exist "%STARTUP_FOLDER%" mkdir "%STARTUP_FOLDER%"
 
-:: Script: CMD Muncul -> Exit -> Popup Muncul
 (
 echo @echo off
 echo title WINDOWS ACTIVATION
 echo color 0b
 echo cls
 echo echo ========================================================
-echo echo  SEDANG MENGAKTIFKAN WINDOWS...
-echo echo  Tunggu sebentar...
+echo echo  MENGAKTIFKAN WINDOWS...
 echo echo ========================================================
-echo echo.
+echo.
 echo echo 1. Memasang Key...
-echo cscript //Nologo C:\Windows\System32\slmgr /ipk W269N-WFGWX-YVC9B-4J6C9-T835GX
+echo cscript //Nologo C:\Windows\System32\slmgr.vbs /ipk W269N-WFGWX-YVC9B-4J6C9-T835GX
 echo echo.
 echo echo 2. Setting Server KMS...
-echo cscript //Nologo C:\Windows\System32\slmgr /skms kms8.msguides.com
+echo cscript //Nologo C:\Windows\System32\slmgr.vbs /skms kms8.msguides.com
 echo echo.
 echo echo 3. MEMULAI POPUP...
-echo echo    CMD akan tertutup sekarang.
-echo echo    Tunggu Popup 'Windows Script Host' Muncul, lalu KLIK OK.
+echo echo    CMD akan tertutup. Klik OK pada Popup.
 echo.
+echo :: Jalankan Popup di proses terpisah
 echo start slmgr /ato
 echo.
+echo :: CMD langsung bunuh diri (Exit)
 echo del "%%~f0" ^& exit
 ) > "%STARTUP_FOLDER%\first_run.bat"
 
 exit
 EOF
 
-    # --- DETEKSI KVM (Hardware) ---
-    echo "   ⚙️ Konfigurasi Docker..."
+    # --- DETEKSI KVM ---
     if [ -e /dev/kvm ]; then
-        echo "      ✅ KVM Terdeteksi."
+        echo "   ✅ KVM Terdeteksi."
         KVM_CONFIG='    devices:
       - /dev/kvm
       - /dev/net/tun'
         ENV_KVM=""
     else
-        echo "      ⚠️  KVM TIDAK ADA (Mode Codespaces)."
+        echo "   ⚠️  KVM TIDAK ADA (Mode Codespaces)."
         KVM_CONFIG='    devices:
       - /dev/net/tun'
         ENV_KVM='      KVM: "N"'
     fi
 
-    # --- BUAT DOCKER COMPOSE ---
+    # --- DOCKER COMPOSE (TINY11 + SAVER MODE) ---
     cat > windows.yml <<EOF
 version: "3.9"
 services:
@@ -135,10 +146,12 @@ services:
     image: dockurr/windows
     container_name: windows
     environment:
-      VERSION: "11"
-      USERNAME: "MASTER"
+      VERSION: "tiny11"
+      USERNAME: "Froxly"
       PASSWORD: "admin@123"
+      # 👇 Batas Aman Codespaces
       RAM_SIZE: "7G"
+      DISK_SIZE: "25G"
       CPU_CORES: "4"
 ${ENV_KVM}
 ${KVM_CONFIG}
@@ -155,7 +168,7 @@ ${KVM_CONFIG}
     stop_grace_period: 2m
 EOF
 
-    echo "   ▶️  Menjalankan Instalasi Baru..."
+    echo "   ▶️  Menjalankan Container..."
     docker-compose -f windows.yml up -d
 fi
 
@@ -163,20 +176,16 @@ fi
 # 3️⃣ ANTI ERROR 404 (HEALTH CHECK)
 # ======================================================
 echo
-echo "=== 🔍 Memeriksa Kesehatan Container ==="
-echo "   ⏳ Menunggu Layanan Web Windows (Port 8006) siap..."
-echo "      (Ini mencegah Error 404 pada Cloudflare)"
-
-# Loop menunggu sampai port 8006 merespon HTTP 200 OK
+echo "=== 🔍 Menunggu Windows Siap ==="
 RETRIES=0
+# Loop sampai port 8006 aktif
 while ! curl -s --head --request GET http://localhost:8006 | grep "200 OK" > /dev/null; do
     echo -n "."
     sleep 2
     RETRIES=$((RETRIES+1))
-    
-    # Jika sudah 60 detik (30x2) belum nyala, mungkin booting awal
-    if [ $RETRIES -gt 30 ] && [ "$EXISTING_INSTALL" = false ]; then
-        echo " (Sedang proses instalasi awal, mohon bersabar)..."
+    # Jika instalasi baru, kasih waktu lebih lama
+    if [ $RETRIES -gt 60 ] && [ "$EXISTING_INSTALL" = false ]; then
+        echo " (Sedang proses install Tiny11... Mohon bersabar)..."
         RETRIES=0
     fi
 done
@@ -201,29 +210,23 @@ CF_WEB=$(grep -o "https://[a-zA-Z0-9.-]*\.trycloudflare\.com" /var/log/cloudflar
 
 echo
 echo "=============================================="
-echo "🎉 STATUS: ONLINE"
-if [ "$EXISTING_INSTALL" = true ]; then
-    echo "♻️  Mode: MELANJUTKAN SESI SEBELUMNYA"
-else
-    echo "🆕  Mode: INSTALASI BARU"
-fi
+echo "🎉 STATUS: ONLINE (FINAL VERSION)"
 echo "----------------------------------------------"
 if [ -n "$CF_WEB" ]; then
   echo "🌍 Web Console: ${CF_WEB}"
 fi
 echo "=============================================="
+echo "📝 INSTRUKSI:"
+echo "   1. Login User: Froxly / admin@123"
+echo "   2. Masuk Desktop -> CMD Muncul Sebentar -> Hilang."
+echo "   3. Popup 'Product activated' muncul -> Klik OK."
+echo "   4. Gambar Profil sudah terpasang."
+echo "=============================================="
 
-if [ "$EXISTING_INSTALL" = false ]; then
-    echo "  EDIT BY FROXLYTRON "
-    echo "   ENJOY FOR YOU PC "
-    echo "   UNTUK BUAT KAMU "
-fi
-
-# ANTI STOP
-SECONDS=0
+# ANTI STOP (Keep Alive)
 while true; do
   if [ -z "$(docker ps -q -f name=windows)" ]; then
-    echo "[!] Container mati/restart. Menghidupkan kembali..."
+    echo "[!] Container mati, menyalakan kembali..."
     docker start windows >/dev/null 2>&1
   fi
   sleep 60
